@@ -10,6 +10,15 @@
 #define REFRESH_INTERVAL_S (24UL * 60 * 60)
 #endif
 
+// --- Fish or flowers -------------------------------------------------------------
+
+// Pressing Reset switches between fish and flowers (and draws a new one).
+// The daily wake keeps whichever is showing. Set to 0 and Reset just draws a
+// new picture of the same kind.
+#ifndef SWITCH_ON_RESET
+#define SWITCH_ON_RESET 1
+#endif
+
 // --- Drawing -------------------------------------------------------------------
 
 // Line width in pixels (1 = hairline, as in the original plotter drawings).

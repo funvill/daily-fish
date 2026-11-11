@@ -1,9 +1,11 @@
 // Desktop preview: runs the same generator and page layout as the firmware and
 // writes the 800x480 1-bit image as a PBM file.
 //
-//   g++ -O2 -std=c++17 -Ilib/fishdraw -Isrc -Iinclude tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp -o preview
+//   g++ -O2 -std=c++17 -Ilib/fishdraw -Isrc -Iinclude tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp lib/fishdraw/flowerdraw.cpp -o preview
 //   ./preview --date 2026-11-11 out.pbm
 //   ./preview --name "Carmalumis barneus" out.pbm
+//   ./preview --flower --date 2026-11-11 out.pbm     (flowers instead of fish)
+//   ./preview [--flower] --stress 3000                (put --flower first)
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -46,7 +48,7 @@ struct NullSink : fishdraw::LineSink {
 };
 
 // Generates `count` fish in a row and reports the extremes.
-static int stress(int count) {
+static int stress(int count, layout::Subject subject) {
   NullSink sink;
   unsigned peak = 0, overflows = 0, failures = 0, max_segments = 0;
   long long max_ms = 0;
@@ -57,7 +59,7 @@ static int stress(int count) {
     fishdraw::make_name(seed, 0, name, sizeof(name));
     fishdraw::Stats st;
     auto t0 = std::chrono::steady_clock::now();
-    if (!layout::draw_page(name, sink, &st)) failures++;
+    if (!layout::draw_page(subject, name, sink, &st)) failures++;
     long long ms =
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
     if (ms > max_ms) max_ms = ms;
@@ -68,8 +70,8 @@ static int stress(int count) {
       snprintf(worst, sizeof(worst), "%s", name);
     }
   }
-  printf("%d fish: failures=%u overflows=%u peak store=%u bytes (%s) max segments=%u max time=%lld ms\n", count,
-         failures, overflows, peak, worst, max_segments, max_ms);
+  printf("%d %s: failures=%u overflows=%u peak store=%u bytes (%s) max segments=%u max time=%lld ms\n", count,
+         subject == layout::FLOWER ? "flowers" : "fish", failures, overflows, peak, worst, max_segments, max_ms);
   return failures ? 1 : 0;
 }
 
@@ -77,9 +79,12 @@ int main(int argc, char** argv) {
   char name[64] = "";
   const char* out = "fish.pbm";
   unsigned salt = 0;
+  layout::Subject subject = layout::FISH;
   for (int i = 1; i < argc; i++) {
-    if (!strcmp(argv[i], "--stress") && i + 1 < argc) {
-      return stress(atoi(argv[++i]));
+    if (!strcmp(argv[i], "--flower")) {
+      subject = layout::FLOWER;
+    } else if (!strcmp(argv[i], "--stress") && i + 1 < argc) {
+      return stress(atoi(argv[++i]), subject);
     } else if (!strcmp(argv[i], "--date") && i + 1 < argc) {
       fishdraw::make_name(argv[++i], salt, name, sizeof(name));
     } else if (!strcmp(argv[i], "--salt") && i + 1 < argc) {
@@ -95,7 +100,7 @@ int main(int argc, char** argv) {
   Bitmap bmp(layout::SCREEN_W, layout::SCREEN_H);
   fishdraw::Stats st;
   auto t0 = std::chrono::steady_clock::now();
-  bool ok = layout::draw_page(name, bmp, &st);
+  bool ok = layout::draw_page(subject, name, bmp, &st);
   auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
   printf("%s | ok=%d segments=%u store=%u/%u bytes overflow=%d %lld ms\n", name, ok, (unsigned)st.segments,
          (unsigned)st.arena_peak, (unsigned)st.arena_size, st.overflow, (long long)ms);

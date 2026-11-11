@@ -10,7 +10,7 @@ namespace layout {
 const int SCREEN_W = 800;
 const int SCREEN_H = 480;
 
-// The fish is scaled to fill this box.
+// The fish, or the flowers, are scaled to fill this box.
 const fishdraw::Box FISH_BOX = {24, 14, SCREEN_W - 48, 384};
 
 // The species name, in single-stroke italics, centred under the fish.
@@ -34,10 +34,15 @@ struct ThickSink : fishdraw::LineSink {
   }
 };
 
-// Draws the fish for `name` and the name beneath it.
-inline bool draw_page(const char* name, fishdraw::LineSink& thin, fishdraw::Stats* stats = nullptr) {
+enum Subject { FISH = 0, FLOWER = 1 };
+
+// Draws the fish or the flowers for `name`, and the name beneath.
+inline bool draw_page(Subject subject, const char* name, fishdraw::LineSink& thin,
+                      fishdraw::Stats* stats = nullptr) {
   ThickSink sink(thin, LINE_THICKNESS);
-  if (!fishdraw::draw_fish(name, FISH_BOX, sink, stats)) return false;
+  bool ok = subject == FLOWER ? fishdraw::draw_flower(name, FISH_BOX, sink, stats)
+                              : fishdraw::draw_fish(name, FISH_BOX, sink, stats);
+  if (!ok) return false;
   char label[72];
   size_t n = 0;
   while (name[n] && n < sizeof(label) - 2) {

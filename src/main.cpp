@@ -1,10 +1,12 @@
 // Daily Fish
 //
-// Every 24 hours the panel wakes, generates a new fish on the device, draws
-// it, and goes back to deep sleep. Pressing Reset does the same at once.
+// Every 24 hours the panel wakes, generates a new fish (or flowers) on the
+// device, draws it, and goes back to deep sleep. Pressing Reset switches
+// between fish and flowers and draws a new one at once.
 //
-// There is no clock and no network. The only thing remembered between fish is
-// how many have been drawn, which is kept in flash and picks the next one.
+// There is no clock. What is remembered between pictures is how many have
+// been drawn, which picks the next one, and whether it is showing fish or
+// flowers; both are kept in flash.
 //
 // Hardware: Seeed Studio XIAO 7.5" ePaper Panel (XIAO ESP32-C3 + 800x480
 // black/white UC8179 display).
@@ -68,9 +70,9 @@ static void dump_frame(const uint8_t* buf) {
 }
 #endif
 
-// Draws the fish called `name` with `footer` in the bottom right corner (and
-// the firmware version bottom left), and puts the page on the panel.
-static ShowResult show(const char* name, const char* footer) {
+// Draws the fish or flowers called `name` with `footer` in the bottom right
+// corner (and the firmware version bottom left), and puts the page on the panel.
+static ShowResult show(layout::Subject subject, const char* name, const char* footer) {
   ShowResult res;
   memset(&res, 0, sizeof(res));
 
@@ -88,13 +90,13 @@ static ShowResult show(const char* name, const char* footer) {
   CanvasSink sink;
   sink.canvas = canvas;
   uint32_t t0 = millis();
-  res.ok = layout::draw_page(name, sink, &res.stats);
+  res.ok = layout::draw_page(subject, name, sink, &res.stats);
   res.generate_ms = millis() - t0;
 
   int16_t bx, by;
   uint16_t bw, bh;
   if (!res.ok) {
-    const char* text = "No fish this time.";
+    const char* text = "Nothing to show this time.";
     canvas->getTextBounds(text, 0, 0, &bx, &by, &bw, &bh);
     canvas->setCursor((layout::SCREEN_W - (int)bw) / 2 - bx, layout::SCREEN_H / 2);
     canvas->print(text);
@@ -144,15 +146,37 @@ static uint32_t next_fish_number() {
   return n;
 }
 
-// Generates and shows fish number `n` of this panel. The panel's own hardware
-// address is part of the seed, so two panels do not show the same fish.
-static bool draw_fish_number(uint32_t n) {
+// Fish or flowers: kept in flash, like the count.
+static layout::Subject saved_subject() {
+  Preferences prefs;
+  if (!prefs.begin("fish", true)) return layout::FISH;
+  uint8_t v = prefs.getUChar("subject", 0);
+  prefs.end();
+  return v == 1 ? layout::FLOWER : layout::FISH;
+}
+
+static void save_subject(layout::Subject s) {
+  Preferences prefs;
+  if (!prefs.begin("fish", false)) return;
+  prefs.putUChar("subject", s == layout::FLOWER ? 1 : 0);
+  prefs.end();
+}
+
+static layout::Subject switch_subject() {
+  layout::Subject s = saved_subject() == layout::FISH ? layout::FLOWER : layout::FISH;
+  save_subject(s);
+  return s;
+}
+
+// Generates and shows picture number `n` of this panel. The panel's own
+// hardware address is part of the seed, so two panels do not show the same one.
+static bool draw_number(layout::Subject subject, uint32_t n) {
   char seed[48], name[64], footer[24];
   snprintf(seed, sizeof(seed), "%012llx-%u", (unsigned long long)ESP.getEfuseMac(), (unsigned)n);
   fishdraw::make_name(seed, 0, name, sizeof(name));
   snprintf(footer, sizeof(footer), "No. %u", (unsigned)n);
-  ShowResult r = show(name, SHOW_FISH_NUMBER ? footer : "");
-  Serial.printf("fish no. %u: ", (unsigned)n);
+  ShowResult r = show(subject, name, SHOW_FISH_NUMBER ? footer : "");
+  Serial.printf("%s no. %u: ", subject == layout::FLOWER ? "flower" : "fish", (unsigned)n);
   report(name, r);
   return r.ok;
 }
@@ -255,7 +279,12 @@ void setup() {
   ota::seed_wifi_from_build();
   // A firmware that arrived over the air is on trial until it has drawn a
   // fish; if it resets before this, the bootloader returns to the old one.
-  if (draw_fish_number(next_fish_number())) ota::confirm_running_firmware();
+  // The Reset button (or switching the power on) changes between fish and
+  // flowers. A timer wake, or a restart after an update, keeps what it had.
+  esp_reset_reason_t why = esp_reset_reason();
+  Serial.printf("reset reason %d\n", (int)why);
+  layout::Subject subject = why == ESP_RST_POWERON && SWITCH_ON_RESET ? switch_subject() : saved_subject();
+  if (draw_number(subject, next_fish_number())) ota::confirm_running_firmware();
   update_if_newer();
   deep_sleep(REFRESH_INTERVAL_S);
 }
@@ -265,17 +294,24 @@ void loop() {}
 #else  // BENCH_MODE
 
 // Commands, one per line:
-//   next              draw the next fish, exactly as a wake or a Reset would
+//   next              draw the next picture, exactly as a daily wake would
+//   switch            change between fish and flowers and draw, as Reset would
 //   name Some name    draw the fish with that species name
+//   flower Some name  draw the flowers with that species name
 // plus the common commands (ssid, pass, ota).
 static void bench_command(const String& line) {
   if (line == "next") {
-    draw_fish_number(next_fish_number());
+    draw_number(saved_subject(), next_fish_number());
+  } else if (line == "switch") {
+    draw_number(switch_subject(), next_fish_number());
   } else if (line.startsWith("name ")) {
-    ShowResult r = show(line.c_str() + 5, "Bench");
+    ShowResult r = show(layout::FISH, line.c_str() + 5, "Bench");
     report(line.c_str() + 5, r);
+  } else if (line.startsWith("flower ")) {
+    ShowResult r = show(layout::FLOWER, line.c_str() + 7, "Bench");
+    report(line.c_str() + 7, r);
   } else if (!common_command(line)) {
-    Serial.println("commands: next | name <text> | ssid <name> | pass <password> | ota");
+    Serial.println("commands: next | switch | name <text> | flower <text> | ssid <name> | pass <password> | ota");
   }
   Serial.println("READY");
 }
@@ -287,6 +323,7 @@ void setup() {
   while (!Serial && millis() - t0 < 3000) delay(10);
   ota::confirm_running_firmware();
   ota::seed_wifi_from_build();
+  Serial.printf("reset reason %d\n", (int)esp_reset_reason());
   Serial.printf("daily-fish %s bench. free heap %u, largest block %u\n", FW_VERSION, (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
   Serial.println("READY");
