@@ -1,0 +1,63 @@
+# Builds the firmware and publishes it as a GitHub release whenever a version
+# tag such as v0.1.0 is pushed.
+name: Release firmware
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      FW_VERSION: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio esptool
+
+      - name: Check the generator on the build machine
+        run: |
+          g++ -O2 -std=c++17 -Wall -Ilib/fishdraw -Isrc -Iinclude tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp -o preview
+          ./preview --stress 300
+
+      - name: Build firmware
+        run: pio run -e panel
+
+      - name: Collect release files
+        run: |
+          mkdir dist
+          B=.pio/build/panel
+          # The application alone: for updating a panel that already runs Daily Fish.
+          cp "$B/firmware.bin" "dist/daily-fish-${FW_VERSION}.bin"
+          # Everything in one image, written at address 0: for a panel's first flash.
+          BOOT_APP0=$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -n 1)
+          python -m esptool --chip esp32c3 merge_bin -o "dist/daily-fish-${FW_VERSION}-full.bin" \
+            --flash_mode dio --flash_freq 80m --flash_size 4MB \
+            0x0 "$B/bootloader.bin" 0x8000 "$B/partitions.bin" 0xe000 "$BOOT_APP0" 0x10000 "$B/firmware.bin"
+          (cd dist && sha256sum *.bin > SHA256SUMS.txt)
+          ls -l dist
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$FW_VERSION" dist/* \
+            --title "Daily Fish $FW_VERSION" \
+            --generate-notes \
+            --notes "Firmware for the Seeed Studio XIAO 7.5\" ePaper Panel (XIAO ESP32-C3). See the README for how to flash it."

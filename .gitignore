@@ -1,0 +1,6 @@
+.pio/
+.vscode/
+build/
+include/secrets.h
+*.pbm
+__pycache__/
