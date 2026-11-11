@@ -23,6 +23,22 @@
 #define SHOW_FISH_NUMBER 1
 #endif
 
+// Show the firmware version, small, in the bottom left corner.
+#ifndef SHOW_VERSION
+#define SHOW_VERSION 1
+#endif
+
+// --- Updates -------------------------------------------------------------------
+
+// After drawing each fish, join Wi-Fi and install the newest release from
+// this GitHub repository if it is newer than the running firmware. Does
+// nothing until the panel has been given Wi-Fi settings (see the README).
+#ifndef OTA_ENABLED
+#define OTA_ENABLED 1
+#endif
+#define OTA_REPO "funvill/daily-fish"
+#define WIFI_TIMEOUT_MS 20000
+
 // --- Uploading -----------------------------------------------------------------
 
 // Deep sleep switches the USB port off, so new firmware cannot be uploaded

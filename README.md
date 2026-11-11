@@ -2,7 +2,7 @@
 
 A new procedurally generated fish every day, drawn on a [Seeed Studio XIAO 7.5" ePaper Panel](https://www.seeedstudio.com/XIAO-7-5-ePaper-Panel-p-6416.html).
 
-The fish is generated on the panel itself. There is no server, no companion app, no Wi-Fi and no clock: every 24 hours the XIAO ESP32-C3 inside the panel wakes up, grows a new fish, draws it, and goes back to deep sleep.
+The fish is generated on the panel itself. There is no server, no companion app and no clock: every 24 hours the XIAO ESP32-C3 inside the panel wakes up, grows a new fish, draws it, and goes back to deep sleep.
 
 Each fish gets a pseudo-Latin species name, shown under it.
 
@@ -15,6 +15,30 @@ This project is inspired by, and built on, [fishdraw](https://github.com/LingDon
 - **A new fish** appears every 24 hours.
 - **Press Reset** (behind the stand) for a new fish right now. The 24 hours then count from that press, so pressing Reset at the time of day you want the fish to change sets the schedule.
 - **Fish number.** The panel counts every fish it has generated and keeps the count in flash, where it survives resets, a flat battery and firmware updates. The count picks the next fish, and is shown as "No. 42" in the bottom right corner.
+
+## Updates
+
+The panel can update its own firmware. After drawing each fish it joins Wi-Fi, asks GitHub for this repository's latest release, and installs it if it is newer than what it is running. It then restarts and draws a fresh fish with the new firmware. The version in use is shown in the bottom left corner.
+
+This is off until the panel has Wi-Fi settings (2.4 GHz networks only). Two ways to give them:
+
+- **Building from source:** copy `include/secrets.example.h` to `include/secrets.h`, fill it in, and upload. The firmware saves the settings to the panel's flash the first time it runs.
+- **Over USB serial**, for a panel flashed from a release. Press Reset with the panel plugged into a computer, wait for the fish, and within the next 60 seconds send these two lines from any serial terminal at 115200 baud:
+
+  ```
+  ssid your-network-name
+  pass your-network-password
+  ```
+
+The settings are kept in flash, apart from the firmware, so an update does not lose them. Sending `ota` checks for an update straight away.
+
+How it stays safe:
+
+- The connection to GitHub is verified against the root certificates built into the firmware, so the panel only installs what this repository published.
+- A new firmware is on trial until it has drawn a fish. If it resets before that, the bootloader goes back to the previous version.
+- It only ever moves to a higher version number, and a failed check or download just leaves things as they are until the next day.
+
+Set `OTA_ENABLED` to 0 in `include/config.h` to build a firmware that never uses Wi-Fi.
 
 ## Installing
 
@@ -60,6 +84,8 @@ All in `include/config.h`:
 | `REFRESH_INTERVAL_S` | 24 hours | Time between fish |
 | `LINE_THICKNESS` | 2 | Line width in pixels. 1 is the hairline of the original drawings |
 | `SHOW_FISH_NUMBER` | 1 | Show "No. 42" in the bottom right corner |
+| `SHOW_VERSION` | 1 | Show the firmware version in the bottom left corner |
+| `OTA_ENABLED` | 1 | Look for a newer release after each fish, once Wi-Fi settings are saved |
 | `USB_UPLOAD_WINDOW_S` | 60 | Seconds to stay awake after drawing when a computer is attached |
 | `EPD_DRIVER_CLASS` | `GxEPD2_750_T7` | Display driver |
 
@@ -109,7 +135,7 @@ build/preview --name "Cterirus nigtus" build/fish.pbm
 python tools/bench/capture.py COM8 next build/panel.png
 ```
 
-Commands are `next` (draw the next fish, as a wake would) and `name <species name>`.
+Commands are `next` (draw the next fish, as a wake would), `name <species name>`, and the `ssid`, `pass` and `ota` commands described under Updates.
 
 ### Layout of the code
 
@@ -119,6 +145,7 @@ Commands are `next` (draw the next fish, as a wake would) and `name <species nam
 | `lib/fishdraw/fishdraw_tables.inc` | Name syllables and glyphs, extracted from the original by `tools/gentables.js` |
 | `src/layout.h` | Where the fish, the name and the fish number go on the 800x480 screen |
 | `src/main.cpp` | The fish counter, drawing, the display, and deep sleep |
+| `src/ota.cpp` | Wi-Fi settings and updates from GitHub releases |
 | `include/config.h` | Settings |
 
 ### How the port fits in memory

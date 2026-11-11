@@ -22,6 +22,7 @@
 #include "config.h"
 #include "fishdraw.h"
 #include "layout.h"
+#include "ota.h"
 
 #ifndef FW_VERSION
 #define FW_VERSION "dev"
@@ -67,8 +68,8 @@ static void dump_frame(const uint8_t* buf) {
 }
 #endif
 
-// Draws the fish called `name` with `footer` in the bottom right corner, and
-// puts the page on the panel.
+// Draws the fish called `name` with `footer` in the bottom right corner (and
+// the firmware version bottom left), and puts the page on the panel.
 static ShowResult show(const char* name, const char* footer) {
   ShowResult res;
   memset(&res, 0, sizeof(res));
@@ -97,6 +98,10 @@ static ShowResult show(const char* name, const char* footer) {
     canvas->getTextBounds(text, 0, 0, &bx, &by, &bw, &bh);
     canvas->setCursor((layout::SCREEN_W - (int)bw) / 2 - bx, layout::SCREEN_H / 2);
     canvas->print(text);
+  }
+  if (SHOW_VERSION) {
+    canvas->setCursor(layout::FOOTER_MARGIN_X, layout::FOOTER_BASELINE_Y);
+    canvas->print(FW_VERSION);
   }
   if (footer && footer[0]) {
     canvas->getTextBounds(footer, 0, 0, &bx, &by, &bw, &bh);
@@ -141,7 +146,7 @@ static uint32_t next_fish_number() {
 
 // Generates and shows fish number `n` of this panel. The panel's own hardware
 // address is part of the seed, so two panels do not show the same fish.
-static void draw_fish_number(uint32_t n) {
+static bool draw_fish_number(uint32_t n) {
   char seed[48], name[64], footer[24];
   snprintf(seed, sizeof(seed), "%012llx-%u", (unsigned long long)ESP.getEfuseMac(), (unsigned)n);
   fishdraw::make_name(seed, 0, name, sizeof(name));
@@ -149,6 +154,65 @@ static void draw_fish_number(uint32_t n) {
   ShowResult r = show(name, SHOW_FISH_NUMBER ? footer : "");
   Serial.printf("fish no. %u: ", (unsigned)n);
   report(name, r);
+  return r.ok;
+}
+
+// --- Updates and serial commands ---------------------------------------------------
+
+// Looks for a newer release and, if one was installed, restarts into it.
+static void update_if_newer() {
+#if OTA_ENABLED
+  ota::Result r = ota::check_and_update(FW_VERSION);
+  Serial.printf("update check: %s\n", ota::describe(r));
+  if (r == ota::UPDATED) {
+    Serial.println("restarting into the new firmware");
+    Serial.flush();
+    delay(200);
+    ESP.restart();
+  }
+#endif
+}
+
+// Commands accepted over USB serial while the panel is awake:
+//   ssid <network name>   then
+//   pass <password>       saves the Wi-Fi settings to flash
+//   ota                   look for a newer release now
+// Returns false if the line was not one of these.
+static bool common_command(const String& line) {
+  static String pending_ssid;
+  if (line.startsWith("ssid ")) {
+    pending_ssid = line.substring(5);
+    Serial.println("network name noted; now send: pass <password>");
+  } else if (line == "pass" || line.startsWith("pass ")) {
+    if (!pending_ssid.length()) {
+      Serial.println("send the network name first: ssid <network name>");
+    } else {
+      ota::save_wifi(pending_ssid.c_str(), line.length() > 5 ? line.c_str() + 5 : "");
+      Serial.println("Wi-Fi settings saved");
+    }
+  } else if (line == "ota") {
+    update_if_newer();
+  } else {
+    return false;
+  }
+  return true;
+}
+
+// Reads whatever has arrived on serial; returns a complete line, or "".
+static String read_serial_line() {
+  static String buf;
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == '\n' || c == '\r') {
+      String line = buf;
+      buf = "";
+      line.trim();
+      if (line.length()) return line;
+    } else if (buf.length() < 200) {
+      buf += c;
+    }
+  }
+  return "";
 }
 
 // --- Sleep -----------------------------------------------------------------------
@@ -170,7 +234,11 @@ static void deep_sleep(uint64_t seconds) {
   if (USB_UPLOAD_WINDOW_S > 0 && usb_host_connected()) {
     Serial.printf("USB host connected: staying awake %d s for uploads\n", USB_UPLOAD_WINDOW_S);
     uint32_t t0 = millis();
-    while (millis() - t0 < USB_UPLOAD_WINDOW_S * 1000UL) delay(100);
+    while (millis() - t0 < USB_UPLOAD_WINDOW_S * 1000UL) {
+      String line = read_serial_line();
+      if (line.length() && !common_command(line)) Serial.println("commands: ssid <name> | pass <password> | ota");
+      delay(50);
+    }
     if (seconds > USB_UPLOAD_WINDOW_S + 60) seconds -= USB_UPLOAD_WINDOW_S;
   }
   Serial.printf("sleeping for %llu s\n", (unsigned long long)seconds);
@@ -184,7 +252,11 @@ static void deep_sleep(uint64_t seconds) {
 void setup() {
   Serial.begin(115200);
   Serial.printf("daily-fish %s\n", FW_VERSION);
-  draw_fish_number(next_fish_number());
+  ota::seed_wifi_from_build();
+  // A firmware that arrived over the air is on trial until it has drawn a
+  // fish; if it resets before this, the bootloader returns to the old one.
+  if (draw_fish_number(next_fish_number())) ota::confirm_running_firmware();
+  update_if_newer();
   deep_sleep(REFRESH_INTERVAL_S);
 }
 
@@ -195,15 +267,15 @@ void loop() {}
 // Commands, one per line:
 //   next              draw the next fish, exactly as a wake or a Reset would
 //   name Some name    draw the fish with that species name
-static void bench_command(String line) {
-  line.trim();
+// plus the common commands (ssid, pass, ota).
+static void bench_command(const String& line) {
   if (line == "next") {
     draw_fish_number(next_fish_number());
   } else if (line.startsWith("name ")) {
     ShowResult r = show(line.c_str() + 5, "Bench");
     report(line.c_str() + 5, r);
-  } else if (line.length()) {
-    Serial.println("commands: next | name <text>");
+  } else if (!common_command(line)) {
+    Serial.println("commands: next | name <text> | ssid <name> | pass <password> | ota");
   }
   Serial.println("READY");
 }
@@ -213,22 +285,16 @@ void setup() {
   Serial.setTimeout(50);
   uint32_t t0 = millis();
   while (!Serial && millis() - t0 < 3000) delay(10);
+  ota::confirm_running_firmware();
+  ota::seed_wifi_from_build();
   Serial.printf("daily-fish %s bench. free heap %u, largest block %u\n", FW_VERSION, (unsigned)ESP.getFreeHeap(),
                 (unsigned)ESP.getMaxAllocHeap());
   Serial.println("READY");
 }
 
 void loop() {
-  static String line;
-  while (Serial.available()) {
-    char c = (char)Serial.read();
-    if (c == '\n' || c == '\r') {
-      if (line.length()) bench_command(line);
-      line = "";
-    } else {
-      line += c;
-    }
-  }
+  String line = read_serial_line();
+  if (line.length()) bench_command(line);
   delay(5);
 }
 
