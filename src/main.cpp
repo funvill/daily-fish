@@ -126,6 +126,39 @@ static ShowResult show(layout::Subject subject, const char* name, const char* fo
   return res;
 }
 
+// Puts a small boxed message in the middle of the screen, over whatever is
+// showing, using the display's fast partial refresh: about a second and a
+// half, with no full-screen flash. It is the only sign that a press of Reset
+// has been noticed while a picture is being worked out.
+static uint32_t show_notice(const char* text) {
+  const int W = 336, H = 56;  // width and left edge must be multiples of 8
+  const int X = (layout::SCREEN_W - W) / 2, Y = (layout::SCREEN_H - H) / 2;
+  GFXcanvas1 box(W, H);
+  if (!box.getBuffer()) return 0;
+  box.fillScreen(1);
+  box.drawRect(0, 0, W, H, 0);
+  box.drawRect(1, 1, W - 2, H - 2, 0);
+  box.setFont(&FreeSans9pt7b);
+  box.setTextColor(0);
+  box.setTextWrap(false);
+  int16_t bx, by;
+  uint16_t bw, bh;
+  box.getTextBounds(text, 0, 0, &bx, &by, &bw, &bh);
+  box.setCursor((W - (int)bw) / 2 - bx, (H - (int)bh) / 2 - by);
+  box.print(text);
+
+  uint32_t t0 = millis();
+  epd.init(0, false, 10, false);
+  // A partial refresh only moves pixels it believes are changing. Telling the
+  // panel the box used to be the exact opposite makes it drive every pixel,
+  // which wipes the old picture from under the box.
+  epd.writeImageToPrevious(box.getBuffer(), X, Y, W, H, true);
+  epd.writeImage(box.getBuffer(), X, Y, W, H);
+  epd.refresh(X, Y, W, H);
+  epd.powerOff();
+  return millis() - t0;
+}
+
 static void report(const char* name, const ShowResult& r) {
   Serial.printf("%s: ok=%d generate=%u ms refresh=%u ms segments=%u store=%u/%u overflow=%d min-free-heap=%u\n", name,
                 r.ok, (unsigned)r.generate_ms, (unsigned)r.refresh_ms, (unsigned)r.stats.segments,
@@ -144,6 +177,31 @@ static uint32_t next_fish_number() {
   prefs.putUInt("count", n);
   prefs.end();
   return n;
+}
+
+static uint32_t current_fish_number() {
+  Preferences prefs;
+  if (!prefs.begin("fish", true)) return 1;
+  uint32_t n = prefs.getUInt("count", 1);
+  prefs.end();
+  return n;
+}
+
+// Set while a picture is being generated and put on the screen, so that the
+// next start can tell that the last one never finished.
+static bool drawing_in_progress() {
+  Preferences prefs;
+  if (!prefs.begin("fish", true)) return false;
+  bool busy = prefs.getUChar("busy", 0) != 0;
+  prefs.end();
+  return busy;
+}
+
+static void set_drawing_in_progress(bool busy) {
+  Preferences prefs;
+  if (!prefs.begin("fish", false)) return;
+  prefs.putUChar("busy", busy ? 1 : 0);
+  prefs.end();
 }
 
 // Fish or flowers: kept in flash, like the count.
@@ -170,7 +228,15 @@ static layout::Subject switch_subject() {
 
 // Generates and shows picture number `n` of this panel. The panel's own
 // hardware address is part of the seed, so two panels do not show the same one.
-static bool draw_number(layout::Subject subject, uint32_t n) {
+// With `notice`, says so on the screen first.
+static bool draw_number(layout::Subject subject, uint32_t n, bool notice = false) {
+  if (notice && LOADING_NOTICE) {
+    char text[48];
+    snprintf(text, sizeof(text), "Drawing %s no. %u ...", subject == layout::FLOWER ? "flowers" : "a fish",
+             (unsigned)n);
+    uint32_t ms = show_notice(text);
+    Serial.printf("notice shown in %u ms\n", (unsigned)ms);
+  }
   char seed[48], name[64], footer[24];
   snprintf(seed, sizeof(seed), "%012llx-%u", (unsigned long long)ESP.getEfuseMac(), (unsigned)n);
   fishdraw::make_name(seed, 0, name, sizeof(name));
@@ -283,8 +349,25 @@ void setup() {
   // flowers. A timer wake, or a restart after an update, keeps what it had.
   esp_reset_reason_t why = esp_reset_reason();
   Serial.printf("reset reason %d\n", (int)why);
-  layout::Subject subject = why == ESP_RST_POWERON && SWITCH_ON_RESET ? switch_subject() : saved_subject();
-  if (draw_number(subject, next_fish_number())) ota::confirm_running_firmware();
+  layout::Subject subject;
+  uint32_t number;
+  // A fish takes up to half a minute to appear, and nothing shows meanwhile.
+  // If Reset is pressed again during that time, carry on with the picture
+  // that was being drawn rather than switching away from it. (After a crash,
+  // do move on, so that one bad picture cannot be retried for ever.)
+  if (drawing_in_progress() && why == ESP_RST_POWERON) {
+    subject = saved_subject();
+    number = current_fish_number();
+    Serial.println("the last picture was interrupted; drawing it again");
+  } else {
+    subject = why == ESP_RST_POWERON && SWITCH_ON_RESET ? switch_subject() : saved_subject();
+    number = next_fish_number();
+  }
+  set_drawing_in_progress(true);
+  // Someone is standing at the panel if it was the button; tell them.
+  bool drew = draw_number(subject, number, why == ESP_RST_POWERON);
+  set_drawing_in_progress(false);
+  if (drew) ota::confirm_running_firmware();
   update_if_newer();
   deep_sleep(REFRESH_INTERVAL_S);
 }
@@ -303,7 +386,7 @@ static void bench_command(const String& line) {
   if (line == "next") {
     draw_number(saved_subject(), next_fish_number());
   } else if (line == "switch") {
-    draw_number(switch_subject(), next_fish_number());
+    draw_number(switch_subject(), next_fish_number(), true);
   } else if (line.startsWith("name ")) {
     ShowResult r = show(layout::FISH, line.c_str() + 5, "Bench");
     report(line.c_str() + 5, r);

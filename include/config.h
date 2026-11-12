@@ -26,6 +26,13 @@
 #define LINE_THICKNESS 2
 #endif
 
+// After a press of Reset, show a small "Drawing a fish ..." box straight away.
+// A fish takes up to half a minute to work out, and without this the screen
+// gives no sign that the press was noticed.
+#ifndef LOADING_NOTICE
+#define LOADING_NOTICE 1
+#endif
+
 // Show "No. 42", the count of fish this panel has generated, in the bottom
 // right corner. Set to 0 for a frame with nothing but the fish and its name.
 #ifndef SHOW_FISH_NUMBER

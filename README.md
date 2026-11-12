@@ -45,6 +45,7 @@ The flowers are not from fishdraw, which has none. They are a new generator writ
 - **A new picture** appears every 24 hours, of the same kind as the last: fish stay fish, flowers stay flowers.
 - **Press Reset** (behind the stand) to switch between fish and flowers. It draws a new one straight away. Press it twice for a new picture of the same kind. The 24 hours then count from the press, so pressing Reset at the time of day you want the picture to change sets the schedule.
 - **Picture number.** The panel counts every picture it has generated and keeps the count, and whether it is on fish or flowers, in flash, where they survive resets, a flat battery and firmware updates. The count picks the next picture, and is shown as "No. 42" in the bottom right corner.
+- **Be patient with fish.** A fish takes 5 to 30 seconds to appear after a press. A small "Drawing a fish ..." box appears in the middle of the screen within a couple of seconds to show the press was noticed. Pressing Reset again while it is working starts the same picture again; it does not switch.
 - **The Boot button** is not used. It cannot wake the panel from deep sleep; on this chip only Reset can.
 
 ## Updates
@@ -115,6 +116,7 @@ All in `include/config.h`:
 | `REFRESH_INTERVAL_S` | 24 hours | Time between pictures |
 | `SWITCH_ON_RESET` | 1 | Reset switches between fish and flowers. With 0 it just draws a new one |
 | `LINE_THICKNESS` | 2 | Line width in pixels. 1 is the hairline of the original drawings |
+| `LOADING_NOTICE` | 1 | Show the "Drawing ..." box after a press of Reset |
 | `SHOW_FISH_NUMBER` | 1 | Show "No. 42" in the bottom right corner |
 | `SHOW_VERSION` | 1 | Show the firmware version in the bottom left corner |
 | `OTA_ENABLED` | 1 | Look for a newer release after each fish, once Wi-Fi settings are saved |
