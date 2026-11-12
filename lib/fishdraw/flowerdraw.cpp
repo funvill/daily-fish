@@ -5,7 +5,7 @@
 // parts (the noise, clipping and hatching in fishdraw_core.inc, which are
 // ported from fishdraw.js, Copyright (c) 2021 Lingdong Huang, MIT License).
 //
-// A drawing is one to three stems of one made-up species. Everything is
+// A drawing is two to five stems of one made-up species. Everything is
 // added to a scene from the front to the back; each new shape has the parts
 // hidden behind earlier shapes cut away, then becomes something that hides
 // what comes after it.
@@ -26,6 +26,11 @@
 // Upper bound on the points kept for one drawing.
 #ifndef FLOWERDRAW_MAX_POINTS
 #define FLOWERDRAW_MAX_POINTS 14000
+#endif
+
+// A page with fewer points than this is thought too bare, and is tried again.
+#ifndef FLOWERDRAW_MIN_POINTS
+#define FLOWERDRAW_MIN_POINTS 1100
 #endif
 
 namespace fishdraw {
@@ -210,6 +215,7 @@ struct Blade {
   real wobble; // unevenness of the edge
   int tip;
   int veins;   // lines of texture each side of the middle
+  bool midrib; // a line down the middle
 };
 
 real blade_width(const Blade& b, real t) {
@@ -267,6 +273,7 @@ BladeShape make_blade(const Blade& b, const Pt& o, real ang, real id, int n = 13
   res.lines.push_back(loop);
 
   for (int k = -b.veins; k <= b.veins; k++) {
+    if (k == 0 && !b.midrib) continue;
     real f = b.veins ? (real)k / (b.veins + 1) : 0;
     real t0 = k == 0 ? 0.04_r : rr(0.05_r, 0.3_r);
     real t1 = k == 0 ? rr(0.6_r, 0.85_r) : rr(0.45_r, 0.9_r);
@@ -286,6 +293,7 @@ BladeShape make_blade(const Blade& b, const Pt& o, real ang, real id, int n = 13
 BladeShape make_leaf(const Blade& b, const Pt& o, real ang, real id, int style) {
   Blade plain = b;
   plain.veins = 0;
+  plain.midrib = true;
   BladeShape res = make_blade(plain, o, ang, id);
   if (style == 1) {
     // Strap leaf: long lines running the length.
@@ -331,7 +339,7 @@ Poly circle(real cx, real cy, real r, int n, real wob, real id) {
 // The made-up species
 // ---------------------------------------------------------------------------
 
-enum { HEAD_RADIAL, HEAD_CUP, HEAD_UMBEL };
+enum { HEAD_RADIAL, HEAD_CUP, HEAD_UMBEL, HEAD_DOUBLE, HEAD_SPIKE };
 enum { DISC_SEEDS, DISC_HATCH, DISC_STAMENS };
 
 struct Species {
@@ -352,10 +360,11 @@ struct Species {
 Species make_species() {
   Species sp;
   memset(&sp, 0, sizeof(sp));
-  static const int HEAD_W[] = {6, 2, 2};
-  sp.head = pick(HEAD_W, 3);
+  static const int HEAD_W[] = {6, 3, 1, 3, 2};
+  sp.head = pick(HEAD_W, 5);
   Blade& p = sp.petal;
   p.L = 1;  // heads are built at unit petal length and scaled when placed
+  p.midrib = true;
 
   if (sp.head == HEAD_RADIAL) {
     static const int COUNT_W[] = {3, 3, 2, 2, 2};
@@ -378,6 +387,39 @@ Species make_species() {
     static const int DISC_W[] = {4, 2, 3};
     sp.disc_style = pick(DISC_W, 3);
     sp.alternate = chance(0.5_r);
+    if (sp.petals > 12) {
+      // Many narrow petals: any texture on them just turns the head black.
+      p.veins = 0;
+      p.midrib = chance(0.35_r);
+      sp.rings = 1;
+    }
+  } else if (sp.head == HEAD_DOUBLE) {
+    // Rings of broad petals, small in the middle and large outside, like a
+    // rose or a peony.
+    sp.rings = ri(3, 4);
+    sp.petals = ri(5, 8);
+    p.W = rr(0.36_r, 0.5_r);
+    p.pos = rr(0.5_r, 0.7_r);
+    p.base = rr(0.3_r, 0.5_r);
+    p.bend = 0;
+    p.wobble = rr(0.1_r, 0.3_r);
+    p.tip = chance(0.6_r) ? TIP_ROUND : TIP_NOTCHED;
+    p.veins = ri(0, 1);
+    p.midrib = chance(0.5_r);
+    sp.disc_r = rr(0.1_r, 0.16_r);
+    sp.disc_style = chance(0.5_r) ? DISC_STAMENS : DISC_SEEDS;
+  } else if (sp.head == HEAD_SPIKE) {
+    // Small bells up the top of the stem, like a foxglove or a hyacinth.
+    sp.florets = ri(9, 16);
+    sp.petals = 3;
+    p.W = rr(0.22_r, 0.3_r);
+    p.pos = rr(0.5_r, 0.65_r);
+    p.base = rr(0.35_r, 0.5_r);
+    p.bend = 0;
+    p.wobble = 0.1_r;
+    p.tip = chance(0.5_r) ? TIP_POINTED : TIP_ROUND;
+    p.veins = 0;
+    sp.rings = 1;
   } else if (sp.head == HEAD_CUP) {
     sp.petals = ri(3, 5);
     p.W = rr(0.27_r, 0.4_r);
@@ -389,7 +431,7 @@ Species make_species() {
     p.veins = ri(2, 4);
     sp.rings = 1;
   } else {
-    sp.florets = ri(12, 26);
+    sp.florets = ri(16, 28);
     sp.petals = ri(4, 6);
     p.W = rr(0.3_r, 0.42_r);
     p.pos = rr(0.5_r, 0.7_r);
@@ -418,7 +460,7 @@ Species make_species() {
   l.wobble = rr(0.1_r, 0.35_r);
   l.tip = TIP_POINTED;
   l.veins = ri(4, 7);
-  sp.leaves = ri(1, 3);
+  sp.leaves = ri(2, 4);
   sp.stem_w = rr(1.6_r, 3);
   return sp;
 }
@@ -507,13 +549,35 @@ void add_radial_head(Scene& sc, const Species& sp, const Frame& f, real id) {
   }
 }
 
-void add_cup_head(Scene& sc, const Species& sp, const Frame& f, real id) {
-  // Seen from the side: a front petal, then the ones behind fanned out.
+void add_double_head(Scene& sc, const Species& sp, const Frame& f, real id) {
+  add_disc(sc, sp, f, id);
+  for (int ring = 0; ring < sp.rings; ring++) {
+    real frac = sp.rings > 1 ? (real)ring / (sp.rings - 1) : 1;
+    Blade b = sp.petal;
+    b.L = 0.42_r + 0.58_r * frac;
+    int n = sp.petals + ring;
+    // Wide enough that neighbours overlap all the way round.
+    b.W = std::max(sp.petal.W * b.L * 1.1_r, 2.3_r * b.L / n);
+    real offset = rr(0, PI * 2);
+    real base_r = sp.disc_r * 0.5_r;
+    for (int i = 0; i < n; i++) {
+      real a = offset + (real)i / n * PI * 2 + rr(-0.06_r, 0.06_r);
+      Blade bi = b;
+      bi.L *= rr(0.93_r, 1.07_r);
+      BladeShape s = make_blade(bi, P(std::cos(a) * base_r, std::sin(a) * base_r), a, id + ring * 40 + i, 10);
+      Poly outline = f.map(s.outline);
+      sc.add(f.map(s.lines), &outline);
+    }
+  }
+}
+
+// Seen from the side: a front petal, then the ones behind fanned out.
+// `spread_scale` below 1 closes it up, as for a bud; `n` is the blade detail.
+void add_cup_head(Scene& sc, const Species& sp, const Frame& f, real id, real spread_scale = 1, int n = 13) {
   const real up = -PI / 2;
-  real spread = rr(0.22_r, 0.42_r);
-  int n = sp.petals;
+  real spread = rr(0.22_r, 0.42_r) * spread_scale;
   int order = 0;
-  for (int i = 0; i < n; i++) {
+  for (int i = 0; i < sp.petals; i++) {
     // 0, +1, -1, +2, -2 ... steps of the fan, front to back.
     int step = (i + 1) / 2;
     int side = (i % 2) ? 1 : -1;
@@ -521,7 +585,7 @@ void add_cup_head(Scene& sc, const Species& sp, const Frame& f, real id) {
     Blade b = sp.petal;
     b.L *= 1 + step * 0.03_r;
     b.bend = -side * step * 0.06_r;
-    BladeShape s = make_blade(b, P(0, 0), a, id + order++);
+    BladeShape s = make_blade(b, P(0, 0), a, id + order++, n);
     Poly outline = f.map(s.outline);
     sc.add(f.map(s.lines), &outline);
   }
@@ -580,8 +644,79 @@ void add_umbel_head(Scene& sc, const Species& sp, const Frame& f, real id) {
 }
 
 // ---------------------------------------------------------------------------
-// One flower: head, leaves, stem
+// One flower: head, buds, leaves, stem
 // ---------------------------------------------------------------------------
+
+// A point part-way along a polyline of evenly spread points, and the
+// direction of travel there.
+Pt point_on(const Poly& path, real t, real* tangent) {
+  int n = (int)path.size() - 1;
+  real x = t * n;
+  int i = std::min(n - 1, std::max(0, trunc_i(x)));
+  real f = x - i;
+  int a = std::max(0, i - 1), b = std::min(n, i + 2);
+  if (tangent) *tangent = std::atan2(path[b].y - path[a].y, path[b].x - path[a].x);
+  return lerp2d(path[i], path[i + 1], f);
+}
+
+// A closed bud on its own short stalk, branching from `from`.
+void add_bud(Scene& sc, const Species& sp, const Pt& from, int side, real size, real id) {
+  Pt end = P(from.x + side * size * rr(0.45_r, 0.7_r), from.y - size * rr(0.55_r, 0.85_r));
+  Species closed = sp;
+  closed.petals = 3;
+  closed.petal.L = 1;
+  closed.petal.W = std::min(0.3_r, std::max(0.2_r, sp.petal.W * 0.7_r));
+  closed.petal.pos = 0.45_r;
+  closed.petal.base = 0.4_r;
+  closed.petal.tip = TIP_POINTED;
+  closed.petal.veins = 0;
+  closed.petal.midrib = true;
+  Frame f;
+  f.cx = end.x;
+  f.cy = end.y;
+  f.scale = size * 0.42_r;
+  f.squash = 1;
+  f.rot = side * rr(0.1_r, 0.45_r);
+  add_cup_head(sc, closed, f, id, 0.45_r, 8);
+  Polys stalk(1);
+  Pt ctrl = P(from.x + side * size * 0.1_r, end.y + size * 0.15_r);
+  for (int j = 0; j <= 8; j++) {
+    real t = (real)j / 8;
+    stalk[0].push_back(P((1 - t) * (1 - t) * from.x + 2 * t * (1 - t) * ctrl.x + t * t * end.x,
+                         (1 - t) * (1 - t) * from.y + 2 * t * (1 - t) * ctrl.y + t * t * end.y));
+  }
+  sc.add(stalk, nullptr);
+}
+
+// Small bells up the top half of the stem, alternating sides, smaller towards
+// the tip.
+void add_spike(Scene& sc, const Species& sp, const Poly& mid, real size, real id) {
+  int count = sp.florets;
+  for (int k = 0; k < count; k++) {
+    real u = count > 1 ? (real)k / (count - 1) : 0;
+    real tang;
+    Pt at = point_on(mid, lerp(0.46_r, 0.97_r, u), &tang);
+    int side = (k % 2) ? 1 : -1;
+    // Out from the stem and hanging a little.
+    real dir = tang + side * rr(1.15_r, 1.5_r);
+    Frame f;
+    f.scale = size * lerp(0.36_r, 0.17_r, u);
+    f.cx = at.x + std::cos(dir) * f.scale * 0.2_r;
+    f.cy = at.y + std::sin(dir) * f.scale * 0.2_r;
+    f.squash = 1;
+    f.rot = dir + PI / 2;
+    add_cup_head(sc, sp, f, id + k * 5, 1.7_r, 7);
+  }
+  // A closed tip.
+  real tang;
+  Pt top = point_on(mid, 1, &tang);
+  Blade tip = sp.petal;
+  tip.L = size * 0.2_r;
+  tip.W = tip.L * 0.28_r;
+  tip.tip = TIP_POINTED;
+  BladeShape s = make_blade(tip, top, tang, id + 900, 6);
+  sc.add(s.lines, &s.outline);
+}
 
 void add_flower(Scene& sc, const Species& sp, const Pt& base, const Pt& head, real head_size, real id) {
   Frame f;
@@ -589,21 +724,10 @@ void add_flower(Scene& sc, const Species& sp, const Pt& base, const Pt& head, re
   f.cy = head.y;
   f.scale = head_size;
   f.rot = rr(-0.25_r, 0.25_r) + (head.x - base.x) * 0.004_r;
-  f.squash = 1;
+  f.squash = sp.head == HEAD_RADIAL ? rr(0.62_r, 1) : (sp.head == HEAD_DOUBLE ? rr(0.75_r, 1) : 1);
 
-  // Where the stem meets the head.
-  Pt top = head;
-  if (sp.head == HEAD_RADIAL) {
-    f.squash = rr(0.62_r, 1);
-    add_radial_head(sc, sp, f, id);
-  } else if (sp.head == HEAD_CUP) {
-    add_cup_head(sc, sp, f, id);
-  } else {
-    add_umbel_head(sc, sp, f, id);
-    top = f.map(P(0, 0.95_r));
-  }
-
-  // The stem: a curve from the ground to the head.
+  // The stem: a curve from the ground to where it meets the head.
+  Pt top = sp.head == HEAD_UMBEL ? f.map(P(0, 0.95_r)) : head;
   Pt ctrl = P(lerp(base.x, top.x, 0.35_r) + rr(-25, 25), lerp(base.y, top.y, 0.55_r));
   const int n = 26;
   Poly mid;
@@ -613,19 +737,36 @@ void add_flower(Scene& sc, const Species& sp, const Pt& base, const Pt& head, re
                     (1 - t) * (1 - t) * base.y + 2 * t * (1 - t) * ctrl.y + t * t * top.y));
   }
 
-  // Leaves, in front of the stem, on alternate sides.
+  // Front to back: the head, a bud, the leaves, then the stem behind it all.
+  if (sp.head == HEAD_RADIAL) {
+    add_radial_head(sc, sp, f, id);
+  } else if (sp.head == HEAD_DOUBLE) {
+    add_double_head(sc, sp, f, id);
+  } else if (sp.head == HEAD_CUP) {
+    add_cup_head(sc, sp, f, id);
+  } else if (sp.head == HEAD_UMBEL) {
+    add_umbel_head(sc, sp, f, id);
+  } else {
+    add_spike(sc, sp, mid, head_size, id);
+  }
+
   int side = chance(0.5_r) ? 1 : -1;
+  bool spike = sp.head == HEAD_SPIKE;
+  if (!spike && sp.head != HEAD_UMBEL && chance(0.45_r)) {
+    add_bud(sc, sp, point_on(mid, rr(0.5_r, 0.72_r), nullptr), side, head_size * rr(0.8_r, 1.1_r), id + 300);
+  }
+
+  // Leaves, on alternate sides. A spike keeps its leaves below the flowers.
   for (int k = 0; k < sp.leaves; k++) {
-    real t = rr(0.12_r, 0.62_r);
-    int i = std::min(n - 1, std::max(1, trunc_i(t * n)));
-    real tang = std::atan2(mid[i + 1].y - mid[i - 1].y, mid[i + 1].x - mid[i - 1].x);
+    real tang;
+    Pt at = point_on(mid, spike ? rr(0.08_r, 0.4_r) : rr(0.1_r, 0.62_r), &tang);
     Blade b = sp.leaf;
     b.L *= rr(0.75_r, 1.1_r);
     b.W *= rr(0.8_r, 1.1_r);
-    // Leaves open away from the stem and droop: the curl goes downwards.
+    // Leaves open away from the stem and curl over.
     real open = sp.leaf_style == 1 ? rr(0.2_r, 0.5_r) : rr(0.6_r, 1.1_r);
     b.bend = std::fabs(b.bend) * side;
-    BladeShape s = make_leaf(b, mid[i], tang + side * open, id + 70 + k, sp.leaf_style);
+    BladeShape s = make_leaf(b, at, tang + side * open, id + 70 + k, sp.leaf_style);
     sc.add(s.lines, &s.outline);
     side = -side;
   }
@@ -646,36 +787,57 @@ void add_flower(Scene& sc, const Species& sp, const Pt& base, const Pt& head, re
   sc.add(edges, &outline);
 }
 
+// Fills the scene with a bunch of one freshly made-up species. The page is
+// 500 x 300 units, like the fish. Stems stand on the bottom edge and fan
+// outwards; shorter ones stand in front.
+void compose(Scene& sc) {
+  Species sp = make_species();
+  static const int STEMS_W[] = {3, 5, 3, 1};
+  int stems = pick(STEMS_W, 4) + 2;  // 2 to 5
+  if (sp.head == HEAD_UMBEL && stems > 3) stems = 3;
+
+  real spacing = rr(80, 112);
+  real size = sp.head == HEAD_CUP     ? rr(52, 68)
+              : sp.head == HEAD_UMBEL ? rr(50, 64)
+              : sp.head == HEAD_SPIKE ? rr(60, 80)
+              : sp.head == HEAD_DOUBLE ? rr(44, 60)
+                                       : rr(40, 62);
+  if (stems >= 4) size *= 0.9_r;
+  real tall = rr(190, 228);
+
+  struct Stem {
+    Pt base, head;
+    real size;
+  };
+  Stem st[5];
+  for (int i = 0; i < stems; i++) {
+    real off = i - (stems - 1) / 2.0_r;
+    real h = tall * (1 - 0.15_r * std::fabs(off)) * rr(0.86_r, 1.06_r);
+    st[i].base = P(250 + off * spacing * 0.45_r + rr(-8, 8), 300);
+    st[i].head = P(250 + off * spacing + rr(-12, 12), 300 - h);
+    st[i].size = size * rr(0.82_r, 1.02_r);
+  }
+  // Shortest first: those are nearest the viewer.
+  std::sort(st, st + stems, [](const Stem& a, const Stem& b) { return a.head.y > b.head.y; });
+  for (int k = 0; k < stems; k++) add_flower(sc, sp, st[k].base, st[k].head, st[k].size, 11 + k * 131);
+}
+
 }  // namespace
 
 bool draw_flower(const char* name, const Box& box, LineSink& sink, Stats* stats) {
   if (stats) memset(stats, 0, sizeof(*stats));
   jsr = seed_from(name);
   perlin.clear();
+  init_trig();
 
-  Species sp = make_species();
-  static const int STEMS_W[] = {1, 3, 5};
-  int stems = pick(STEMS_W, 3) + 1;
-
-  // The page is 500 x 300 units, like the fish. Stems stand on the bottom
-  // edge; the outer ones are shorter, lean outwards, and stand in front.
+  // Now and then a species comes out thin: a couple of stems of something
+  // simple. Try again, a few times, for a page with more on it.
   Scene sc;
-  real spacing = rr(95, 135);
-  real size = sp.head == HEAD_CUP ? rr(52, 68) : (sp.head == HEAD_UMBEL ? rr(46, 60) : rr(40, 62));
-  int order[3] = {0, 2, 1};
-  if (stems == 1) order[0] = 0;
-  if (stems == 2) {
-    order[0] = 0;
-    order[1] = 1;
-  }
-  for (int k = 0; k < stems; k++) {
-    int i = order[k];
-    real off = i - (stems - 1) / 2.0_r;  // -1, 0, 1 for three stems
-    bool outer = stems == 3 && i != 1;
-    Pt base = P(250 + off * spacing * 0.45_r + rr(-8, 8), 300);
-    real height = (outer ? rr(140, 185) : rr(185, 225)) * (stems == 1 ? 1.05_r : 1);
-    Pt head = P(250 + off * spacing + rr(-12, 12), 300 - height);
-    add_flower(sc, sp, base, head, size * (outer ? rr(0.8_r, 0.95_r) : 1), 11 + k * 131);
+  for (int attempt = 0; attempt < 4; attempt++) {
+    sc = Scene();
+    sc.lines.reserve(1024);
+    compose(sc);
+    if (sc.points >= FLOWERDRAW_MIN_POINTS) break;
   }
 
   // Scale to fill the box.

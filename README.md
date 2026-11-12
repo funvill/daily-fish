@@ -28,28 +28,28 @@ These are the 800x480 images the panel draws, rendered by the desktop preview fr
 
 ### Flowers
 
-![A single stem with a cluster of small flowers](docs/images/flower-1.png)
+![Five stems of small five-petalled flowers](docs/images/flower-1.png)
 
-![Three daisy-like flowers](docs/images/flower-2.png)
+![Three spikes of small bells](docs/images/flower-2.png)
 
-![Two broad-petalled flowers](docs/images/flower-3.png)
+![Three rose-like flowers](docs/images/flower-3.png)
 
-![Three tulip-like flowers](docs/images/flower-4.png)
+![Four flowers with veined petals and a bud](docs/images/flower-4.png)
 
-![Three large flowers with strap leaves](docs/images/flower-5.png)
+![Three large open flowers](docs/images/flower-5.png)
 
 ## Inspiration
 
 This project is inspired by, and built on, [fishdraw](https://github.com/LingDong-/fishdraw) by Lingdong Huang: a single JavaScript file that generates all sorts of weird fish as plotter-style line drawings. Every fish here is a fishdraw fish. This repository ports that generator from JavaScript to C++ and restructures it to fit in the ESP32-C3's 400 KB of RAM, so it can run on the panel.
 
-The flowers are not from fishdraw, which has none. They are a new generator written for this project in the same style, built on fishdraw's noise, clipping and hatching.
+The flowers are not from fishdraw, which has none. They are a new generator written for this project in the same style, built on fishdraw's noise, clipping and hatching. A page is two to five stems of one made-up species, in one of five forms: open and daisy-like, layered like a rose, cupped like a tulip, a cluster of small flowers, or a spike of bells.
 
 ## Using it
 
 - **A new picture** appears every 24 hours, of the same kind as the last: fish stay fish, flowers stay flowers.
 - **Press Reset** (behind the stand) to switch between fish and flowers. It draws a new one straight away. Press it twice for a new picture of the same kind. The 24 hours then count from the press, so pressing Reset at the time of day you want the picture to change sets the schedule.
 - **Picture number.** The panel counts every picture it has generated and keeps the count, and whether it is on fish or flowers, in flash, where they survive resets, a flat battery and firmware updates. The count picks the next picture, and is shown as "No. 42" in the bottom right corner.
-- **Be patient with fish.** A fish takes 5 to 30 seconds to appear after a press. A small "Drawing a fish ..." box appears in the middle of the screen within a couple of seconds to show the press was noticed. Pressing Reset again while it is working starts the same picture again; it does not switch.
+- **Be patient with fish.** A fish takes 5 to 20 seconds to appear after a press. A small "Drawing a fish ..." box appears in the middle of the screen within a couple of seconds to show the press was noticed. Pressing Reset again while it is working starts the same picture again; it does not switch.
 - **The Boot button** is not used. It cannot wake the panel from deep sleep; on this chip only Reset can.
 
 ## Updates
@@ -131,7 +131,7 @@ All in `include/config.h`:
 
 - **Which fish.** The panel's hardware address and the fish count seed a name generator, and the name seeds the fish. Two panels show different fish. `node fishdraw.js --seed "<name>"` with the original program draws the same fish for the same name.
 - **Timekeeping.** The sleep timer is good to a few minutes a day, so the time the fish changes drifts slowly.
-- **Time taken.** Generating a fish takes 5 to 30 seconds on the ESP32-C3, which has no floating point unit; flowers are quicker. The display refresh takes about 4 seconds.
+- **Time taken.** The ESP32-C3 has no floating point unit, so a picture takes a while to work out: 5 to 20 seconds for a fish, and under 6 for flowers. The display refresh takes about 4 seconds more.
 
 ## Releases
 
@@ -173,7 +173,7 @@ Add `--flower` before the other options for flowers. `build/preview --stress 300
 python tools/bench/capture.py COM8 next build/panel.png
 ```
 
-Commands are `next` (draw the next picture, as a daily wake would), `switch` (change between fish and flowers, as Reset would), `name <species name>` for a fish, `flower <species name>` for flowers, and the `ssid`, `pass` and `ota` commands described under Updates.
+Commands are `status`, `next` (draw the next picture, as a daily wake would), `switch` (change between fish and flowers, as Reset would), `name <species name>` for a fish, `flower <species name>` for flowers, and the `ssid`, `pass` and `ota` commands described under Updates.
 
 ### Layout of the code
 
@@ -198,6 +198,16 @@ The original builds every line of the fish as JavaScript arrays, up to about 25,
 - Pattern shading, which never changes the outline, is drawn as it is generated and never stored.
 
 Random numbers are drawn in exactly the original order, which is what keeps the fish identical to the original's.
+
+### How it is made fast enough
+
+The chip does floating point in software, where one cosine costs thousands of cycles and even comparing two numbers is a function call.
+
+- The noise function, which asks for twelve cosines a call, reads them from a table.
+- Clipping is mostly comparisons that rule edges out. Those are done on the floats' bit patterns as integers.
+- Joining two polygons does not repeat the intersection tests it has already made.
+
+Together these roughly halved the time for a fish. The heaviest of 400 surveyed went from 30 seconds to 19, and a typical one from 14 to 5.
 
 ## Licence
 

@@ -70,10 +70,52 @@ const int PERLIN_SIZE = 4095;
 
 std::vector<real> perlin;
 
-inline real scaled_cosine(real i) { return 0.5_r * (1.0_r - std::cos(i * PI)); }
+// Sine and cosine from a table. The ESP32-C3 has no floating point unit, and
+// the library versions cost thousands of cycles each; the noise function
+// alone asks for twelve cosines per call. Linear interpolation over 512 steps
+// of a quarter turn is good to about one part in a million.
+const int TRIG_STEPS = 512;
+real g_quarter_sine[TRIG_STEPS + 1];
+bool g_trig_ready = false;
+
+void init_trig() {
+  if (g_trig_ready) return;
+  for (int i = 0; i <= TRIG_STEPS; i++) g_quarter_sine[i] = std::sin((real)i / TRIG_STEPS * (PI / 2));
+  g_quarter_sine[TRIG_STEPS] = 1;
+  g_trig_ready = true;
+}
+
+// sin(f * pi/2) for f in 0..1
+inline real quarter_sine(real f) {
+  real x = f * TRIG_STEPS;
+  int i = (int)x;
+  if (i >= TRIG_STEPS) return g_quarter_sine[TRIG_STEPS];
+  if (i < 0) return 0;
+  real t = x - i;
+  return g_quarter_sine[i] + (g_quarter_sine[i + 1] - g_quarter_sine[i]) * t;
+}
+
+real fsin(real a) {
+  if (!(a > -1.0e5_r && a < 1.0e5_r)) return std::sin(a);
+  real t = a * (2 / PI);
+  int k = (int)t;
+  if (t < k) k--;
+  real f = t - k;
+  switch (k & 3) {
+    case 0: return quarter_sine(f);
+    case 1: return quarter_sine(1 - f);
+    case 2: return -quarter_sine(f);
+    default: return -quarter_sine(1 - f);
+  }
+}
+
+inline real fcos(real a) { return fsin(a + PI / 2); }
+
+inline real scaled_cosine(real i) { return 0.5_r * (1.0_r - fcos(i * PI)); }
 
 real noise(real x, real y = 0, real z = 0) {
   if (perlin.empty()) {
+    init_trig();
     perlin.resize(PERLIN_SIZE + 1);
     for (int i = 0; i < PERLIN_SIZE + 1; i++) perlin[i] = rnd();
   }
@@ -180,7 +222,8 @@ Poly trsl_poly(const Poly& p, real x, real y) {
 
 Poly rot_poly(const Poly& p, real th) {
   Poly q(p.size());
-  real c = std::cos(th), s = std::sin(th);
+  init_trig();
+  real c = fcos(th), s = fsin(th);
   for (size_t i = 0; i < p.size(); i++) q[i] = P(p[i].x * c - p[i].y * s, p[i].x * s + p[i].y * c);
   return q;
 }
@@ -232,18 +275,44 @@ inline bool seg_isect(real p0x, real p0y, real p1x, real p1y, real q0x, real q0y
   return true;
 }
 
-// A polygon to clip against, with its bounding box cached.
+// Comparing two floats costs a library call on a chip without an FPU, and
+// clipping is mostly comparisons that rule edges out. A float's bits, with
+// the negative range flipped, order the same way as the float does, so those
+// tests are done on integers instead.
+static_assert(sizeof(real) == 4, "the comparison keys assume 32-bit floats");
+
+inline int32_t fkey(real v) {
+  int32_t b;
+  memcpy(&b, &v, sizeof(b));
+  if (b == (int32_t)0x80000000) return 0;  // -0 and +0 are the same number
+  return b ^ ((b >> 31) & 0x7fffffff);
+}
+
+// A polygon to clip against, with its bounding box and comparison keys cached.
 struct Region {
   const Poly* p;
   real x0, y0, x1, y1;
-  explicit Region(const Poly& poly) : p(&poly) {
+  int32_t kx0, ky0, kx1, ky1;
+  std::vector<int32_t> kx, ky;
+  explicit Region(const Poly& poly) : p(&poly), kx(poly.size()), ky(poly.size()) {
+    kx0 = ky0 = INT32_MAX;
+    kx1 = ky1 = INT32_MIN;
+    for (size_t i = 0; i < poly.size(); i++) {
+      int32_t a = fkey(poly[i].x), b = fkey(poly[i].y);
+      kx[i] = a;
+      ky[i] = b;
+      if (a < kx0) kx0 = a;
+      if (a > kx1) kx1 = a;
+      if (b < ky0) ky0 = b;
+      if (b > ky1) ky1 = b;
+    }
     x0 = y0 = INFINITY;
     x1 = y1 = -INFINITY;
     for (size_t i = 0; i < poly.size(); i++) {
-      x0 = std::min(x0, poly[i].x);
-      y0 = std::min(y0, poly[i].y);
-      x1 = std::max(x1, poly[i].x);
-      y1 = std::max(y1, poly[i].y);
+      if (fkey(poly[i].x) == kx0) x0 = poly[i].x;
+      if (fkey(poly[i].x) == kx1) x1 = poly[i].x;
+      if (fkey(poly[i].y) == ky0) y0 = poly[i].y;
+      if (fkey(poly[i].y) == ky1) y1 = poly[i].y;
     }
   }
 };
@@ -257,17 +326,23 @@ std::vector<Hit> g_hits;
 // Crossings of segment a-b with the polygon, sorted along the segment.
 void seg_isect_poly(const Pt& a, const Pt& b, const Region& rg, std::vector<Hit>& hits) {
   hits.clear();
-  real sx0 = std::min(a.x, b.x), sx1 = std::max(a.x, b.x);
-  real sy0 = std::min(a.y, b.y), sy1 = std::max(a.y, b.y);
-  if (sx1 < rg.x0 || sx0 > rg.x1 || sy1 < rg.y0 || sy0 > rg.y1) return;
+  int32_t kax = fkey(a.x), kbx = fkey(b.x), kay = fkey(a.y), kby = fkey(b.y);
+  int32_t sx0 = std::min(kax, kbx), sx1 = std::max(kax, kbx);
+  int32_t sy0 = std::min(kay, kby), sy1 = std::max(kay, kby);
+  if (sx1 < rg.kx0 || sx0 > rg.kx1 || sy1 < rg.ky0 || sy0 > rg.ky1) return;
   const Poly& poly = *rg.p;
   size_t n = poly.size();
+  const int32_t* kx = rg.kx.data();
+  const int32_t* ky = rg.ky.data();
   for (size_t i = 0; i < n; i++) {
-    const Pt& c = poly[i];
-    const Pt& d = poly[i + 1 == n ? 0 : i + 1];
+    size_t i1 = i + 1 == n ? 0 : i + 1;
     // An edge wholly to one side of the segment's box cannot cross it.
-    if ((c.x < sx0 && d.x < sx0) || (c.x > sx1 && d.x > sx1)) continue;
-    if ((c.y < sy0 && d.y < sy0) || (c.y > sy1 && d.y > sy1)) continue;
+    int32_t cx = kx[i], dx = kx[i1];
+    if ((cx < sx0 && dx < sx0) || (cx > sx1 && dx > sx1)) continue;
+    int32_t cy = ky[i], dy = ky[i1];
+    if ((cy < sy0 && dy < sy0) || (cy > sy1 && dy > sy1)) continue;
+    const Pt& c = poly[i];
+    const Pt& d = poly[i1];
     real t, s;
     if (seg_isect(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, false, &t, &s)) {
       Hit h;
@@ -291,15 +366,21 @@ void seg_isect_poly(const Pt& a, const Pt& b, const Region& rg, std::vector<Hit>
 // Is the point inside the polygon? Counts crossings of a ray in the original's
 // fixed direction (e, pi).
 bool point_inside(const Pt& a, const Region& rg) {
-  if (a.x > rg.x1 || a.y > rg.y1) return false;  // the ray only travels +x, +y
+  int32_t kax = fkey(a.x), kay = fkey(a.y);
+  // Outside the polygon's box is outside the polygon.
+  if (kax > rg.kx1 || kay > rg.ky1 || kax < rg.kx0 || kay < rg.ky0) return false;
   const Poly& poly = *rg.p;
   size_t n = poly.size();
+  const int32_t* kx = rg.kx.data();
+  const int32_t* ky = rg.ky.data();
   int count = 0;
   real bx = a.x + E_, by = a.y + PI;
   for (size_t i = 0; i < n; i++) {
+    size_t i1 = i + 1 == n ? 0 : i + 1;
+    // The ray only travels +x, +y: edges behind it cannot be hit.
+    if ((kx[i] < kax && kx[i1] < kax) || (ky[i] < kay && ky[i1] < kay)) continue;
     const Pt& c = poly[i];
-    const Pt& d = poly[i + 1 == n ? 0 : i + 1];
-    if ((c.x < a.x && d.x < a.x) || (c.y < a.y && d.y < a.y)) continue;
+    const Pt& d = poly[i1];
     real t, s;
     if (seg_isect(a.x, a.y, bx, by, c.x, c.y, d.x, d.y, true, &t, &s)) count++;
   }
@@ -435,8 +516,10 @@ bool build_vertices(const Poly& poly, const Poly& other, UVerts& out, const UVer
     // On the first pass, an edge clear of the other polygon's box has no
     // crossings. The second pass mirrors the first, so it must not skip.
     if (!oout) {
-      if ((a.x < ob.x0 && b.x < ob.x0) || (a.x > ob.x1 && b.x > ob.x1)) continue;
-      if ((a.y < ob.y0 && b.y < ob.y0) || (a.y > ob.y1 && b.y > ob.y1)) continue;
+      int32_t kax = fkey(a.x), kbx = fkey(b.x);
+      if ((kax < ob.kx0 && kbx < ob.kx0) || (kax > ob.kx1 && kbx > ob.kx1)) continue;
+      int32_t kay = fkey(a.y), kby = fkey(b.y);
+      if ((kay < ob.ky0 && kby < ob.ky0) || (kay > ob.ky1 && kby > ob.ky1)) continue;
     }
     size_t first = out.is.size();
     for (int j = 0; j < m; j++) {
@@ -458,7 +541,10 @@ bool build_vertices(const Poly& poly, const Poly& other, UVerts& out, const UVer
           }
         }
       }
-      if (!found) {
+      // The second pass only mirrors what the first found. Testing each pair
+      // again (as the original does) costs a great deal for a large polygon
+      // and can only turn up a crossing that the first pass would dispute.
+      if (!found && !oout) {
         real t, s;
         if (seg_isect(a.x, a.y, b.x, b.y, c.x, c.y, d.x, d.y, false, &t, &s)) {
           xx.t = t;
@@ -714,6 +800,7 @@ void poissondisk(real W, real H, real r, Poly& samples) {
     // Too fine for the memory we have; coarsen the grid's extent rather than fail.
     rows = (int)(60000L / std::max(cols, 1));
   }
+  init_trig();
   std::vector<int16_t> grid((size_t)cols * rows, -1);
   std::vector<uint16_t> active;
   samples.push_back(P(W / 2, H / 2));
@@ -731,8 +818,8 @@ void poissondisk(real W, real H, real r, Poly& samples) {
     for (int n = 0; n < 30; n++) {
       real sr = r + rnd() * r;
       real sa = 6.2831853072_r * rnd();
-      real sx = pos.x + sr * std::cos(sa);
-      real sy = pos.y + sr * std::sin(sa);
+      real sx = pos.x + sr * fcos(sa);
+      real sy = pos.y + sr * fsin(sa);
       int col = trunc_i(sx / w);
       int row = trunc_i(sy / w);
       if (col > 0 && row > 0 && col < cols - 1 && row < rows - 1 && grid[col + row * cols] == -1) {

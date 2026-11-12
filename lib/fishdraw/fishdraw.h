@@ -43,7 +43,7 @@ void make_name(const char* seed_text, uint32_t salt, char* out, size_t out_size)
 // Returns false if the polyline store could not be allocated.
 bool draw_fish(const char* name, const Box& box, LineSink& sink, Stats* stats = nullptr);
 
-// Generates the flowers that belong to `name` (one to three stems of one
+// Generates the flowers that belong to `name` (two to five stems of one
 // made-up species) and draws them scaled to fit `box`. Not part of the
 // original fishdraw; see flowerdraw.cpp.
 bool draw_flower(const char* name, const Box& box, LineSink& sink, Stats* stats = nullptr);

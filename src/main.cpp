@@ -267,6 +267,7 @@ static void update_if_newer() {
 //   ssid <network name>   then
 //   pass <password>       saves the Wi-Fi settings to flash
 //   ota                   look for a newer release now
+//   status                version, uptime, why it last restarted, memory
 // Returns false if the line was not one of these.
 static bool common_command(const String& line) {
   static String pending_ssid;
@@ -280,6 +281,10 @@ static bool common_command(const String& line) {
       ota::save_wifi(pending_ssid.c_str(), line.length() > 5 ? line.c_str() + 5 : "");
       Serial.println("Wi-Fi settings saved");
     }
+  } else if (line == "status") {
+    Serial.printf("daily-fish %s, up %lu s, reset reason %d, free heap %u, lowest %u\n", FW_VERSION,
+                  (unsigned long)(millis() / 1000), (int)esp_reset_reason(), (unsigned)ESP.getFreeHeap(),
+                  (unsigned)ESP.getMinFreeHeap());
   } else if (line == "ota") {
     update_if_newer();
   } else {
@@ -326,7 +331,7 @@ static void deep_sleep(uint64_t seconds) {
     uint32_t t0 = millis();
     while (millis() - t0 < USB_UPLOAD_WINDOW_S * 1000UL) {
       String line = read_serial_line();
-      if (line.length() && !common_command(line)) Serial.println("commands: ssid <name> | pass <password> | ota");
+      if (line.length() && !common_command(line)) Serial.println("commands: ssid <name> | pass <password> | ota | status");
       delay(50);
     }
     if (seconds > USB_UPLOAD_WINDOW_S + 60) seconds -= USB_UPLOAD_WINDOW_S;

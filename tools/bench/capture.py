@@ -7,11 +7,15 @@ a PNG, so the image can be checked without looking at the panel.
   python tools/bench/capture.py COM8 "name Carmalumis barneus" out.png
   python tools/bench/capture.py COM8 sync
 """
+import re
 import sys
 import time
 
 import serial
 from PIL import Image
+
+
+HEX_ROW = re.compile(r"^[0-9a-f]{16,}$")
 
 
 def main():
@@ -51,7 +55,13 @@ def main():
                 size = (int(w), int(h))
                 rows = []
                 continue
-            if rows is not None and line == "END":
+            # A frame ends at "END". If that line was lost in transit, the
+            # first line that cannot be a row of hex ends it instead.
+            if rows is not None and line != "END" and not HEX_ROW.match(line):
+                frame_done = True
+            else:
+                frame_done = rows is not None and line == "END"
+            if frame_done:
                 # A row damaged in transit is shown as a white row rather than
                 # failing the capture.
                 width_hex = size[0] // 8 * 2
@@ -74,7 +84,8 @@ def main():
                     Image.frombytes("1", size, data).save(out)
                     print(f"[{time.time() - t0:6.1f}s] saved {out}")
                 rows = None
-                continue
+                if line == "END":
+                    continue
             if rows is not None:
                 rows.append(line)
                 continue
