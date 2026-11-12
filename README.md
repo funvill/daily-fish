@@ -199,6 +199,10 @@ The original builds every line of the fish as JavaScript arrays, up to about 25,
 
 Random numbers are drawn in exactly the original order, which is what keeps the fish identical to the original's.
 
+## Licence
+
+MIT. See `LICENSE`. The fish generator is a port of fishdraw, which is also MIT licensed; its notice is in `LICENSE-fishdraw.txt`.
+
 ## Credits
 
 Inspired by [fishdraw](https://github.com/LingDong-/fishdraw). Fish generation is a port of fishdraw, copyright (c) 2021 Lingdong Huang, MIT License. See `LICENSE-fishdraw.txt`.
