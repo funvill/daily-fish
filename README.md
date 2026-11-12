@@ -6,6 +6,10 @@ The picture is generated on the panel itself. There is no server, no companion a
 
 Each one gets a pseudo-Latin species name, shown under it.
 
+## In real life
+
+![The panel held in a hand, showing a fish named Pseuca helus, with the firmware version bottom left and "No. 9" bottom right](docs/images/panel-photo.jpg)
+
 ## Examples
 
 These are the 800x480 images the panel draws, rendered by the desktop preview from the same code.
