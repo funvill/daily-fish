@@ -1,12 +1,12 @@
 // Daily Fish
 //
-// Every 24 hours the panel wakes, generates a new fish (or flowers) on the
+// Every 24 hours the panel wakes, generates a new fish (or an insect) on the
 // device, draws it, and goes back to deep sleep. Pressing Reset switches
-// between fish and flowers and draws a new one at once.
+// between fish and insects and draws a new one at once.
 //
 // There is no clock. What is remembered between pictures is how many have
-// been drawn, which picks the next one, and whether it is showing fish or
-// flowers; both are kept in flash.
+// been drawn, which picks the next one, and which subject it is showing;
+// both are kept in flash.
 //
 // Hardware: Seeed Studio XIAO 7.5" ePaper Panel (XIAO ESP32-C3 + 800x480
 // black/white UC8179 display).
@@ -204,26 +204,53 @@ static void set_drawing_in_progress(bool busy) {
   prefs.end();
 }
 
-// Fish or flowers: kept in flash, like the count.
+// Whether this firmware was built with a subject in it.
+static bool subject_enabled(layout::Subject s) {
+  if (s == layout::INSECT) return ENABLE_INSECTS != 0;
+  if (s == layout::FLOWER) return ENABLE_FLOWERS != 0;
+  return true;
+}
+
+static const char* subject_noun(layout::Subject s) {
+  return s == layout::INSECT ? "an insect" : s == layout::FLOWER ? "flowers" : "a fish";
+}
+
+// The subject on show: kept in flash, like the count. A subject saved by an
+// earlier firmware that this one does not have falls back to fish.
 static layout::Subject saved_subject() {
   Preferences prefs;
   if (!prefs.begin("fish", true)) return layout::FISH;
   uint8_t v = prefs.getUChar("subject", 0);
   prefs.end();
-  return v == 1 ? layout::FLOWER : layout::FISH;
+  layout::Subject s = v == 1 ? layout::FLOWER : v == 2 ? layout::INSECT : layout::FISH;
+  return subject_enabled(s) ? s : layout::FISH;
 }
 
 static void save_subject(layout::Subject s) {
   Preferences prefs;
   if (!prefs.begin("fish", false)) return;
-  prefs.putUChar("subject", s == layout::FLOWER ? 1 : 0);
+  prefs.putUChar("subject", (uint8_t)s);
   prefs.end();
 }
 
+// Moves on to the next subject this firmware has: fish, insects, flowers.
 static layout::Subject switch_subject() {
-  layout::Subject s = saved_subject() == layout::FISH ? layout::FLOWER : layout::FISH;
-  save_subject(s);
-  return s;
+  static const layout::Subject ORDER[] = {layout::FISH, layout::INSECT, layout::FLOWER};
+  layout::Subject now = saved_subject();
+  int at = 0;
+  for (int i = 0; i < 3; i++) {
+    if (ORDER[i] == now) at = i;
+  }
+  layout::Subject next = now;
+  for (int step = 1; step <= 3; step++) {
+    layout::Subject s = ORDER[(at + step) % 3];
+    if (subject_enabled(s)) {
+      next = s;
+      break;
+    }
+  }
+  save_subject(next);
+  return next;
 }
 
 // Generates and shows picture number `n` of this panel. The panel's own
@@ -232,8 +259,7 @@ static layout::Subject switch_subject() {
 static bool draw_number(layout::Subject subject, uint32_t n, bool notice = false) {
   if (notice && LOADING_NOTICE) {
     char text[48];
-    snprintf(text, sizeof(text), "Drawing %s no. %u ...", subject == layout::FLOWER ? "flowers" : "a fish",
-             (unsigned)n);
+    snprintf(text, sizeof(text), "Drawing %s no. %u ...", subject_noun(subject), (unsigned)n);
     uint32_t ms = show_notice(text);
     Serial.printf("notice shown in %u ms\n", (unsigned)ms);
   }
@@ -242,7 +268,7 @@ static bool draw_number(layout::Subject subject, uint32_t n, bool notice = false
   fishdraw::make_name(seed, 0, name, sizeof(name));
   snprintf(footer, sizeof(footer), "No. %u", (unsigned)n);
   ShowResult r = show(subject, name, SHOW_FISH_NUMBER ? footer : "");
-  Serial.printf("%s no. %u: ", subject == layout::FLOWER ? "flower" : "fish", (unsigned)n);
+  Serial.printf("%s, no. %u: ", subject_noun(subject), (unsigned)n);
   report(name, r);
   return r.ok;
 }
@@ -350,8 +376,8 @@ void setup() {
   ota::seed_wifi_from_build();
   // A firmware that arrived over the air is on trial until it has drawn a
   // fish; if it resets before this, the bootloader returns to the old one.
-  // The Reset button (or switching the power on) changes between fish and
-  // flowers. A timer wake, or a restart after an update, keeps what it had.
+  // The Reset button (or switching the power on) moves on to the next
+  // subject. A timer wake, or a restart after an update, keeps what it had.
   esp_reset_reason_t why = esp_reset_reason();
   Serial.printf("reset reason %d\n", (int)why);
   layout::Subject subject;
@@ -383,9 +409,10 @@ void loop() {}
 
 // Commands, one per line:
 //   next              draw the next picture, exactly as a daily wake would
-//   switch            change between fish and flowers and draw, as Reset would
+//   switch            move to the next subject and draw, as Reset would
 //   name Some name    draw the fish with that species name
-//   flower Some name  draw the flowers with that species name
+//   insect Some name  draw the insect with that species name
+//   flower Some name  draw the flowers with that species name (if built in)
 // plus the common commands (ssid, pass, ota).
 static void bench_command(const String& line) {
   if (line == "next") {
@@ -395,11 +422,14 @@ static void bench_command(const String& line) {
   } else if (line.startsWith("name ")) {
     ShowResult r = show(layout::FISH, line.c_str() + 5, "Bench");
     report(line.c_str() + 5, r);
+  } else if (line.startsWith("insect ")) {
+    ShowResult r = show(layout::INSECT, line.c_str() + 7, "Bench");
+    report(line.c_str() + 7, r);
   } else if (line.startsWith("flower ")) {
     ShowResult r = show(layout::FLOWER, line.c_str() + 7, "Bench");
     report(line.c_str() + 7, r);
   } else if (!common_command(line)) {
-    Serial.println("commands: next | switch | name <text> | flower <text> | ssid <name> | pass <password> | ota");
+    Serial.println("commands: next | switch | name <text> | insect <text> | flower <text> | ssid <name> | pass <password> | ota");
   }
   Serial.println("READY");
 }

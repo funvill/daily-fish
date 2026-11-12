@@ -24,8 +24,8 @@ def main():
     tmp = out + ".tmp.pbm"
     for i in range(count):
         args = [os.path.abspath(exe)]
-        if kind == "flower":
-            args.append("--flower")
+        if kind in ("flower", "insect"):
+            args.append("--" + kind)
         args += ["--date", f"sample-{first + i}", tmp]
         r = subprocess.run(args, capture_output=True, text=True)
         print(r.stdout.strip())

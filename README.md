@@ -1,8 +1,8 @@
 # Daily Fish
 
-A new procedurally generated fish every day, or a bunch of flowers, drawn on a [Seeed Studio XIAO 7.5" ePaper Panel](https://www.seeedstudio.com/XIAO-7-5-ePaper-Panel-p-6416.html).
+A new procedurally generated fish every day, or an insect, drawn on a [Seeed Studio XIAO 7.5" ePaper Panel](https://www.seeedstudio.com/XIAO-7-5-ePaper-Panel-p-6416.html).
 
-The picture is generated on the panel itself. There is no server, no companion app and no clock: every 24 hours the XIAO ESP32-C3 inside the panel wakes up, grows a new fish or flowers, draws them, and goes back to deep sleep.
+The picture is generated on the panel itself. There is no server, no companion app and no clock: every 24 hours the XIAO ESP32-C3 inside the panel wakes up, grows a new fish or insect, draws it, and goes back to deep sleep.
 
 Each one gets a pseudo-Latin species name, shown under it.
 
@@ -26,29 +26,31 @@ These are the 800x480 images the panel draws, rendered by the desktop preview fr
 
 ![A fish with small scales and a forked tail](docs/images/fish-5.png)
 
-### Flowers
+### Insects
 
-![Five stems of small five-petalled flowers](docs/images/flower-1.png)
+![A butterfly with dark wing borders and spots](docs/images/insect-1.png)
 
-![Three spikes of small bells](docs/images/flower-2.png)
+![A dragonfly](docs/images/insect-2.png)
 
-![Three rose-like flowers](docs/images/flower-3.png)
+![A long-horned beetle](docs/images/insect-3.png)
 
-![Four flowers with veined petals and a bud](docs/images/flower-4.png)
+![A striped bee](docs/images/insect-4.png)
 
-![Three large open flowers](docs/images/flower-5.png)
+![An ant](docs/images/insect-5.png)
 
 ## Inspiration
 
 This project is inspired by, and built on, [fishdraw](https://github.com/LingDong-/fishdraw) by Lingdong Huang: a single JavaScript file that generates all sorts of weird fish as plotter-style line drawings. Every fish here is a fishdraw fish. This repository ports that generator from JavaScript to C++ and restructures it to fit in the ESP32-C3's 400 KB of RAM, so it can run on the panel.
 
-The flowers are not from fishdraw, which has none. They are a new generator written for this project in the same style, built on fishdraw's noise, clipping and hatching. A page is two to five stems of one made-up species, in one of five forms: open and daisy-like, layered like a rose, cupped like a tulip, a cluster of small flowers, or a spike of bells.
+The insects are not from fishdraw, which has none. They are a new generator written for this project in the same style, built on fishdraw's noise, clipping and hatching. Where a fish is drawn from the side, an insect is drawn from above like a pinned specimen: beetles (including ladybirds, stag beetles, long-horns and scarabs), butterflies and moths, dragonflies and damselflies, bees, wasps and flies, and ants.
+
+There is also a flower generator, which is switched off. Set `ENABLE_FLOWERS` to 1 in `include/config.h` to build it in.
 
 ## Using it
 
-- **A new picture** appears every 24 hours, of the same kind as the last: fish stay fish, flowers stay flowers.
-- **Press Reset** (behind the stand) to switch between fish and flowers. It draws a new one straight away. Press it twice for a new picture of the same kind. The 24 hours then count from the press, so pressing Reset at the time of day you want the picture to change sets the schedule.
-- **Picture number.** The panel counts every picture it has generated and keeps the count, and whether it is on fish or flowers, in flash, where they survive resets, a flat battery and firmware updates. The count picks the next picture, and is shown as "No. 42" in the bottom right corner.
+- **A new picture** appears every 24 hours, of the same kind as the last: fish stay fish, insects stay insects.
+- **Press Reset** (behind the stand) to switch between fish and insects. It draws a new one straight away. Press it twice for a new picture of the same kind. The 24 hours then count from the press, so pressing Reset at the time of day you want the picture to change sets the schedule.
+- **Picture number.** The panel counts every picture it has generated and keeps the count, and which kind it is on, in flash, where they survive resets, a flat battery and firmware updates. The count picks the next picture, and is shown as "No. 42" in the bottom right corner.
 - **Be patient with fish.** A fish takes 5 to 20 seconds to appear after a press. A small "Drawing a fish ..." box appears in the middle of the screen within a couple of seconds to show the press was noticed. Pressing Reset again while it is working starts the same picture again; it does not switch.
 - **The Boot button** is not used. It cannot wake the panel from deep sleep; on this chip only Reset can.
 
@@ -118,7 +120,9 @@ All in `include/config.h`:
 | Setting | Default | What it does |
 |---|---|---|
 | `REFRESH_INTERVAL_S` | 24 hours | Time between pictures |
-| `SWITCH_ON_RESET` | 1 | Reset switches between fish and flowers. With 0 it just draws a new one |
+| `ENABLE_INSECTS` | 1 | Build the insect generator in |
+| `ENABLE_FLOWERS` | 0 | Build the flower generator in. Off saves 34 KB of flash and 2 KB of RAM, and flowers need the most working memory of the three |
+| `SWITCH_ON_RESET` | 1 | Reset moves on to the next kind that is built in. With 0 it just draws a new one |
 | `LINE_THICKNESS` | 2 | Line width in pixels. 1 is the hairline of the original drawings |
 | `LOADING_NOTICE` | 1 | Show the "Drawing ..." box after a press of Reset |
 | `SHOW_FISH_NUMBER` | 1 | Show "No. 42" in the bottom right corner |
@@ -131,7 +135,7 @@ All in `include/config.h`:
 
 - **Which fish.** The panel's hardware address and the fish count seed a name generator, and the name seeds the fish. Two panels show different fish. `node fishdraw.js --seed "<name>"` with the original program draws the same fish for the same name.
 - **Timekeeping.** The sleep timer is good to a few minutes a day, so the time the fish changes drifts slowly.
-- **Time taken.** The ESP32-C3 has no floating point unit, so a picture takes a while to work out: 5 to 20 seconds for a fish, and under 6 for flowers. The display refresh takes about 4 seconds more.
+- **Time taken.** The ESP32-C3 has no floating point unit, so a picture takes a while to work out: 5 to 20 seconds for a fish, and under a second for an insect. The display refresh takes about 4 seconds more.
 
 ## Releases
 
@@ -154,14 +158,14 @@ The workflow is `.github/workflows/release.yml`. The tag becomes the firmware's 
 The generator in `lib/fishdraw` has no Arduino dependencies, so the page can be rendered on a computer:
 
 ```bash
-g++ -O2 -std=c++17 -Ilib/fishdraw -Isrc -Iinclude tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp lib/fishdraw/flowerdraw.cpp -o build/preview
+g++ -O2 -std=c++17 -Ilib/fishdraw -Isrc -Iinclude tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp lib/fishdraw/insectdraw.cpp lib/fishdraw/flowerdraw.cpp -o build/preview
 ```
 
 ```bash
 build/preview --name "Cterirus nigtus" build/fish.pbm
 ```
 
-Add `--flower` before the other options for flowers. `build/preview --stress 3000` generates 3,000 fish (or, with `--flower` first, flowers) and reports the worst memory use and any failures. `tools/preview/sheet.py` renders several at once into a contact sheet.
+Add `--insect` before the other options for insects (or `--flower`, in a build with `-DENABLE_FLOWERS=1`). `build/preview --stress 3000` generates 3,000 fish (or, with `--insect` first, insects) and reports the worst memory use and any failures. `tools/preview/sheet.py` renders several at once into a contact sheet.
 
 `tools/preview/compare.py` renders the same names with the original `fishdraw.js` and with the port, one above the other, to check the port by eye.
 
@@ -173,18 +177,19 @@ Add `--flower` before the other options for flowers. `build/preview --stress 300
 python tools/bench/capture.py COM8 next build/panel.png
 ```
 
-Commands are `status`, `next` (draw the next picture, as a daily wake would), `switch` (change between fish and flowers, as Reset would), `name <species name>` for a fish, `flower <species name>` for flowers, and the `ssid`, `pass` and `ota` commands described under Updates.
+Commands are `status`, `next` (draw the next picture, as a daily wake would), `switch` (move to the next kind, as Reset would), `name <species name>` for a fish, `insect <species name>` for an insect, and the `ssid`, `pass` and `ota` commands described under Updates.
 
 ### Layout of the code
 
 | Path | What is in it |
 |---|---|
 | `lib/fishdraw/fishdraw.cpp` | The fish generator and single-stroke text. Portable C++ |
-| `lib/fishdraw/flowerdraw.cpp` | The flower generator |
-| `lib/fishdraw/fishdraw_core.inc` | What both share: noise, clipping, polygon union, hatching |
+| `lib/fishdraw/insectdraw.cpp` | The insect generator |
+| `lib/fishdraw/flowerdraw.cpp` | The flower generator, off by default |
+| `lib/fishdraw/fishdraw_core.inc` | What they share: noise, clipping, polygon union, hatching, and a scene of overlapping shapes |
 | `lib/fishdraw/fishdraw_tables.inc` | Name syllables and glyphs, extracted from the original by `tools/gentables.js` |
 | `src/layout.h` | Where the picture, the name and the number go on the 800x480 screen |
-| `src/main.cpp` | The counter, fish or flowers, drawing, the display, and deep sleep |
+| `src/main.cpp` | The counter, which kind to draw, the display, and deep sleep |
 | `src/ota.cpp` | Wi-Fi settings and updates from GitHub releases |
 | `include/config.h` | Settings |
 

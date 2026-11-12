@@ -43,9 +43,15 @@ void make_name(const char* seed_text, uint32_t salt, char* out, size_t out_size)
 // Returns false if the polyline store could not be allocated.
 bool draw_fish(const char* name, const Box& box, LineSink& sink, Stats* stats = nullptr);
 
+// Generates the insect that belongs to `name`, seen from above, and draws it
+// scaled to fit `box`. Not part of the original fishdraw; see insectdraw.cpp.
+// Returns false if the build has ENABLE_INSECTS=0.
+bool draw_insect(const char* name, const Box& box, LineSink& sink, Stats* stats = nullptr);
+
 // Generates the flowers that belong to `name` (two to five stems of one
 // made-up species) and draws them scaled to fit `box`. Not part of the
-// original fishdraw; see flowerdraw.cpp.
+// original fishdraw; see flowerdraw.cpp. Returns false unless the build has
+// ENABLE_FLOWERS=1.
 bool draw_flower(const char* name, const Box& box, LineSink& sink, Stats* stats = nullptr);
 
 // Single-stroke (Hershey) text, as used for the name under the original

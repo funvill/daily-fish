@@ -10,11 +10,22 @@
 #define REFRESH_INTERVAL_S (24UL * 60 * 60)
 #endif
 
-// --- Fish or flowers -------------------------------------------------------------
+// --- What to draw ----------------------------------------------------------------
 
-// Pressing Reset switches between fish and flowers (and draws a new one).
-// The daily wake keeps whichever is showing. Set to 0 and Reset just draws a
-// new picture of the same kind.
+// Fish are always available. These switch the other subjects on (1) or off
+// (0). A subject that is off is left out of the firmware altogether, which
+// saves its flash and RAM.
+#ifndef ENABLE_INSECTS
+#define ENABLE_INSECTS 1
+#endif
+#ifndef ENABLE_FLOWERS
+#define ENABLE_FLOWERS 0
+#endif
+
+// Pressing Reset moves on to the next subject that is switched on (fish,
+// then insects, then flowers) and draws a new one. The daily wake keeps
+// whichever is showing. Set to 0 and Reset just draws a new picture of the
+// same kind.
 #ifndef SWITCH_ON_RESET
 #define SWITCH_ON_RESET 1
 #endif

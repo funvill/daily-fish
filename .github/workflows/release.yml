@@ -33,9 +33,13 @@ jobs:
 
       - name: Check the generator on the build machine
         run: |
-          g++ -O2 -std=c++17 -Wall -Ilib/fishdraw -Isrc -Iinclude tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp lib/fishdraw/flowerdraw.cpp -o preview
+          SRC="tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp lib/fishdraw/insectdraw.cpp lib/fishdraw/flowerdraw.cpp"
+          g++ -O2 -std=c++17 -Wall -Ilib/fishdraw -Isrc -Iinclude $SRC -o preview
           ./preview --stress 300
-          ./preview --flower --stress 300
+          ./preview --insect --stress 300
+          # Flowers are off in the firmware; keep them building and passing.
+          g++ -O2 -std=c++17 -Wall -DENABLE_FLOWERS=1 -Ilib/fishdraw -Isrc -Iinclude $SRC -o preview-flowers
+          ./preview-flowers --flower --stress 300
 
       - name: Build firmware
         run: pio run -e panel

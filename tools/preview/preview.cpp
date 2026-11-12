@@ -1,10 +1,11 @@
 // Desktop preview: runs the same generator and page layout as the firmware and
 // writes the 800x480 1-bit image as a PBM file.
 //
-//   g++ -O2 -std=c++17 -Ilib/fishdraw -Isrc -Iinclude tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp lib/fishdraw/flowerdraw.cpp -o preview
+//   g++ -O2 -std=c++17 -Ilib/fishdraw -Isrc -Iinclude tools/preview/preview.cpp lib/fishdraw/fishdraw.cpp lib/fishdraw/insectdraw.cpp lib/fishdraw/flowerdraw.cpp -o preview
 //   ./preview --date 2026-11-11 out.pbm
 //   ./preview --name "Carmalumis barneus" out.pbm
-//   ./preview --flower --date 2026-11-11 out.pbm     (flowers instead of fish)
+//   ./preview --insect --date 2026-11-11 out.pbm     (an insect instead of a fish)
+//   ./preview --flower --date 2026-11-11 out.pbm     (flowers; build with -DENABLE_FLOWERS=1)
 //   ./preview [--flower] --stress 3000                (put --flower first)
 #include <chrono>
 #include <cstdio>
@@ -71,7 +72,7 @@ static int stress(int count, layout::Subject subject) {
     }
   }
   printf("%d %s: failures=%u overflows=%u peak store=%u bytes (%s) max segments=%u max time=%lld ms\n", count,
-         subject == layout::FLOWER ? "flowers" : "fish", failures, overflows, peak, worst, max_segments, max_ms);
+         subject == layout::FLOWER ? "flowers" : subject == layout::INSECT ? "insects" : "fish", failures, overflows, peak, worst, max_segments, max_ms);
   return failures ? 1 : 0;
 }
 
@@ -83,6 +84,8 @@ int main(int argc, char** argv) {
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--flower")) {
       subject = layout::FLOWER;
+    } else if (!strcmp(argv[i], "--insect")) {
+      subject = layout::INSECT;
     } else if (!strcmp(argv[i], "--stress") && i + 1 < argc) {
       return stress(atoi(argv[++i]), subject);
     } else if (!strcmp(argv[i], "--date") && i + 1 < argc) {

@@ -34,14 +34,16 @@ struct ThickSink : fishdraw::LineSink {
   }
 };
 
-enum Subject { FISH = 0, FLOWER = 1 };
+// The numbers are saved in the panel's flash; do not reuse or reorder them.
+enum Subject { FISH = 0, FLOWER = 1, INSECT = 2 };
 
-// Draws the fish or the flowers for `name`, and the name beneath.
+// Draws the fish, insect or flowers for `name`, and the name beneath.
 inline bool draw_page(Subject subject, const char* name, fishdraw::LineSink& thin,
                       fishdraw::Stats* stats = nullptr) {
   ThickSink sink(thin, LINE_THICKNESS);
-  bool ok = subject == FLOWER ? fishdraw::draw_flower(name, FISH_BOX, sink, stats)
-                              : fishdraw::draw_fish(name, FISH_BOX, sink, stats);
+  bool ok = subject == FLOWER   ? fishdraw::draw_flower(name, FISH_BOX, sink, stats)
+            : subject == INSECT ? fishdraw::draw_insect(name, FISH_BOX, sink, stats)
+                                : fishdraw::draw_fish(name, FISH_BOX, sink, stats);
   if (!ok) return false;
   char label[72];
   size_t n = 0;
